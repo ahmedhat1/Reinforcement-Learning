@@ -1,6 +1,5 @@
 """PyTorch MNIST Example."""
 
-
 from __future__ import print_function
 import argparse
 import sys
@@ -15,17 +14,30 @@ from torch.optim.lr_scheduler import StepLR
 
 class Net(nn.Module):
     """A neural network implementation."""
+
     def __init__(self):
         super(Net, self).__init__()
 
         # TODO: Define the member variables for your layers.
         # Use the appropriate layers from torch.nn
-        self.conv1 = None
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, stride=1)
+        self.conv2 = nn.Conv2d(32, 64, 3, 1)
+        # in features=64*24*24/4 ('loose' 1 pixel at each side per convolutional layer, maximum pooling)
+        self.fc1 = nn.Linear(in_features=9216, out_features=128)
+        self.fc2 = nn.Linear(128, 10)
 
     def forward(self, x):
-
         # TODO: Implement one forward pass of your neural network.
         x = self.conv1(x)
+        x = F.relu(x)
+        x = self.conv2(x)
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
+        x = torch.flatten(x, 1)
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        x = F.softmax(x, dim=1)
         return x
 
 
@@ -50,15 +62,24 @@ def train(model, device, train_loader, optimizer, epoch, args):
 
         # TODO: implement one step of the optimization:
         loss = None
-        # * Calculate predictions
-        # * Calculate the loss (i.e. cross-entropy loss)
-        running_loss.append(loss.data.numpy())
-        # * Backpropagate the loss to find the gradients
-        # * Take one gradient step with your optimizer
 
+        # * Calculate predictions
+        output = model(data)
+
+        # * Calculate the loss (i.e. cross-entropy loss)
+        loss = F.cross_entropy(output, target)
+        running_loss.append(loss.data.numpy())
+
+        # * Backpropagate the loss to find the gradients
+        loss.backward()
+
+        # * Take one gradient step with your optimizer
+        optimizer.step()
+
+        # running loss
         if batch_idx % args["log_interval"] == 0:
             sys.stdout.write('\rTrain Epoch: {} [{}/{}]\tAverage Loss: {:.6f}'.format(
-                epoch, (batch_idx+args["log_interval"]) * len(data), args['batches_per_episode'] * len(data),
+                epoch, (batch_idx + args["log_interval"]) * len(data), args['batches_per_episode'] * len(data),
                 np.average(running_loss)
             ))
             sys.stdout.flush()
@@ -75,19 +96,24 @@ def test(model, device, test_loader):
     test_loss = 0
     # Accumulator for the number of correctly classified items
     correct = 0
-    
+
     # This block will not compute any gradients
     with torch.no_grad():
         # Similar to the inner training loop, only over the test_loader
         for data, target in test_loader:
-
             data, target = data.to(device), target.to(device)
 
             # TODO: Implement the same loss calculations as in training
+
+            output = model(data)
+            test_loss += F.cross_entropy(output, target)
             # No optimizer step here.
+
             # Calculate the predictions (choose class with maximum predicted value) of your model over the batch
+            pred = output.argmax(dim=1, keepdim=True)
+
             # Calculate how many predictions were correct, and add them here
-            correct += 0
+            correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
 
@@ -114,7 +140,6 @@ def get_mnist_loaders(batch_size):
 
 
 def main():
-
     # Seed your model for reproducibility
     torch.manual_seed(4711)
 
@@ -131,7 +156,7 @@ def main():
         dry_run=False,
         batches_per_episode=50
     )
-    
+
     # Retrieve DataLoaders for the train- and test-dataset.
     train_loader, test_loader = get_mnist_loaders(batch_size)
 
@@ -139,7 +164,7 @@ def main():
     model = Net().to(device)
 
     # TODO: Create your optimizer here
-    optimizer = None
+    optimizer = optim.Adadelta(model.parameters(), lr=learning_rate)
 
     # The outer training loop (over epochs)
     test(model, device, test_loader)
